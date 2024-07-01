@@ -1,0 +1,122 @@
+在 VM 上创建 docker 网络 extranet
+root@VM:/$ sudo docker network create --subnet=10.0.2.0/24 --gateway=10.0.2.8 --opt "com.docker.network.bridge.name"="docker1" extranet
+在 VM 上创建 docker 网络 intranet
+root@VM:/$ sudo docker network create --subnet=192.168.60.0/24 --gateway=192.168.60.1 --opt "com.docker.network.bridge.name"="docker2" intranet
+在 VM 上新开一个终端，创建并运行容器 HostU
+root@VM:/$ sudo docker run -it --name=HostU --hostname=HostU --net=extranet --ip=10.0.2.7 --privileged "seedubuntu" /bin/bash
+在 VM 上新开一个终端，创建并运行容器 HostV
+root@VM:/$ sudo docker run -it --name=HostV --hostname=HostV --net=intranet --ip=192.168.60.101 --privileged "seedubuntu" /bin/bash
+在容器 HostU 和 HostV 内分别删除掉默认路由
+root@HostU:/# route del default
+root@HostV:/# route del default
+
+
+在桌面创建文件夹wxfVPN，拷贝makefile、cli.c、ser.c到新建的文件夹内，相关字段改为自己的名字
+在里面创建cert并在cert里打开终端
+cp /usr/lib/ssl/openssl.cnf ./
+mkdir demoCA
+cd demoCA
+mkdir certs crl newcerts
+touch index.txt serial
+echo 1000 > serial
+cd ..
+ openssl req -new -x509 -keyout ca-wxf.key -out ca-wxf.crt -config openssl.cnf
+openssl genrsa -des3 -out server-wxf.key 2048
+openssl req -new -key server-wxf.key -out server-wxf.csr -config openssl.cnf
+openssl ca -in server-wxf.csr -out server-wxf.crt -cert ca-wxf.crt -keyfile ca-wxf.key -config openssl.cnf
+cd ..
+mkdir ca_client
+cp cert/ca-wxf.crt ca_client/
+c_rehash ca_client/
+sudo make
+
+#下面的tls都是指的是wxfVPN
+在HostU中运行
+cd tls
+sudo echo "10.0.2.8 wxf" >> /etc/hosts
+
+在tls运行
+sudo ./myserver
+
+在HostU运行
+sudo ./myclient wxf 4433 seed dees 2
+
+创建hostu2
+sudo docker run -it --name=HostU2 --hostname=HostU2 --net=extranet --ip=10.0.2.6 --privileged "seedubuntu" /bin/bash
+route del default
+cd tls
+sudo echo "10.0.2.8 wxf ">> /etc/hosts
+
+在tls运行
+sudo ./myserver
+
+在HostU2运行
+sudo ./myclient wxf 4433 seed dees 5
+
+然后两个HOST都再开一个终端开始ping 192.168.60.101
+
+
+
+
+
+
+测试准备：/////////////////////////////////////////
+进入HostU和Host2
+sudo docker start HostU
+sudo docker exec -it HostU /bin/bash
+sudo docker start HostU2
+sudo docker exec -it HostU2 /bin/bash
+sudo docker start HostV
+sudo docker exec -it HostV /bin/bash
+route add -net 192.168.53.0/24 gw 192.168.60.1
+
+认证VPN服务器
+进入tls编译
+sudo make
+sudo ./myserver
+HostU中输入
+cd tls
+sudo ./myclient wxf 4433 seed dees 2
+
+VPN客户端提示证书过期
+在tls hostu终端Ctrl+C 关闭客户端和服务器
+HostU设置客户端时间
+date -s 2033/6/1（设置系统日期和时间）运行发现过期
+sudo ./myclient wxf 4433 seed dees 2
+date -s 2024/6/19（改过来，方便后面实验）
+sudo ./myclient wxf 4433 seed dees 2
+
+提示错误无法登录
+HostU中输入
+sudo ./myclient wxf 4433 seed dees1 2（用户名:seed 密码:dees1 登录 会发现提示错误无法登录 ）
+
+能正确登录
+HostU中输入
+sudo ./myclient wxf 4433 seed dees 2
+加密隧道通信
+在正确登录前提下在开一个终端，ping 192.168.60.101
+
+wireshark设置
+编辑 首选项（preference）设置中文
+首选项protocol http 添加ssl/tls ports 端口4433
+监听docker1，hostu ping hostv
+可以看到tls隧道封装的报文
+
+支持多客户端
+tls:sudo ./myser
+在HostV中启用服务
+service openbsd-inetd start
+HostU中输入
+cd tls
+sudo ./myclient wxf 4433 seed dees 2
+HostU2中输入
+cd tls
+sudo ./myclient wxf 4433 seed dees 5
+在开HostU中输入seed dees登录
+telnet 192.168.60.101
+可以看到登上了内网的hostv，且可以直接输入命令跑
+断开其中一个，另外的还是能运行
+
+问题：全自动分配IP怎么实现？server那弄一个数组，每次有申请就遍历找空的，然后打标记分配。
+
+
